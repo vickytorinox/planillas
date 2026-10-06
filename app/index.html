@@ -192,7 +192,7 @@
       <div class="side"><button class="ghost-w" type="button" id="btnAuto" aria-pressed="true">Auto</button></div>
       <button class="shutter" type="button" id="btnShutter" aria-label="Escanear" disabled></button>
       <div class="side">
-        <label class="ghost-w" style="margin:0;cursor:pointer;letter-spacing:1.5px;color:#f0f0f0">Galería<input type="file" accept="image/*" id="fileInput" hidden></label>
+        <label class="ghost-w" style="margin:0;cursor:pointer;letter-spacing:1.5px;color:#f0f0f0;position:relative;overflow:hidden">Galería<input type="file" accept="image/*" id="fileInput" style="position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer"></label>
       </div>
     </div>
   </div>
@@ -202,7 +202,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
   (function () {
-    const OPENCV_URL = 'https://docs.opencv.org/4.10.0/opencv.js';
+    // OpenCV solo se usa para DETECTAR los bordes automáticamente. Recorte y filtros funcionan sin él.
+    const OPENCV_URLS = [
+      'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
+      'https://docs.opencv.org/4.10.0/opencv.js'
+    ];
     const $ = id => document.getElementById(id);
     const local = store('local');
 
@@ -363,31 +367,45 @@
 
     /* ---------- OpenCV ---------- */
     let cvPromise = null;
+    const cvReady = () => !!(window.cv && typeof window.cv.Mat === 'function');
     function loadCV() {
       if (cvPromise) return cvPromise;
       cvPromise = new Promise((resolve, reject) => {
-        let finished = false, poll = null, limit = null;
+        let finished = false, poll = null, limit = null, idx = 0;
         const finish = (err) => {
           if (finished) return; finished = true;
           clearInterval(poll); clearTimeout(limit);
-          if (err) { cvPromise = null; reject(err); } else resolve(true); // nunca resolver con el módulo (es "thenable" y cuelga la página)
+          if (err) { cvPromise = null; reject(err); } else resolve(true); // nunca resolver con el módulo (es "thenable")
         };
-        const isReady = () => !!(window.cv && typeof window.cv.Mat === 'function');
-        if (isReady()) return finish();
-        const s = document.createElement('script');
-        s.src = OPENCV_URL; s.async = true;
-        s.onload = () => {
-          const c = window.cv;
-          if (!c) return finish(new Error('No se pudo iniciar el escáner.'));
-          if (c instanceof Promise) c.then(m => { window.cv = m; }, () => finish(new Error('No se pudo iniciar el escáner.')));
-          else if (!isReady()) c.onRuntimeInitialized = () => finish();
-          poll = setInterval(() => { if (isReady()) finish(); }, 150);
+        if (cvReady()) return finish();
+        const tryNext = () => {
+          if (idx >= OPENCV_URLS.length) return finish(new Error('No se pudo descargar el detector de bordes.'));
+          const s = document.createElement('script');
+          s.src = OPENCV_URLS[idx++]; s.async = true;
+          s.onload = () => {
+            const c = window.cv;
+            if (!c) return tryNext();
+            if (c instanceof Promise) c.then(m => { window.cv = m; }, () => finish(new Error('No se pudo iniciar el detector de bordes.')));
+            else if (!cvReady()) c.onRuntimeInitialized = () => finish();
+            clearInterval(poll);
+            poll = setInterval(() => { if (cvReady()) finish(); }, 150);
+          };
+          s.onerror = () => { s.remove(); tryNext(); };
+          document.head.appendChild(s);
         };
-        s.onerror = () => finish(new Error('No se pudo descargar el escáner. Revisá tu conexión.'));
-        limit = setTimeout(() => finish(new Error('El escáner tardó demasiado en cargar. Revisá tu conexión e intentá de nuevo.')), 90000);
-        document.head.appendChild(s);
+        limit = setTimeout(() => finish(new Error('El detector de bordes tardó demasiado en cargar.')), 90000);
+        tryNext();
       });
       return cvPromise;
+    }
+    // Espera a OpenCV como máximo `ms`; si no está, sigue sin detección automática.
+    function cvWithin(ms) {
+      if (cvReady()) return Promise.resolve(true);
+      return Promise.race([loadCV().then(() => true, () => false), new Promise(r => setTimeout(() => r(false), ms))]);
+    }
+    function safeDetect(canvas) {
+      if (!cvReady()) return null;
+      try { return detectQuad(canvas); } catch (e) { return null; }
     }
 
     function orderPts(pts) {
@@ -444,8 +462,8 @@
           audio: false,
           video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1440 } }
         });
-        const [s] = await Promise.all([camP, loadCV()]);
-        stream = s;
+        loadCV().catch(() => {});
+        stream = await camP;
         video.srcObject = stream;
         await video.play();
         await new Promise(r => video.videoWidth ? r() : video.addEventListener('loadedmetadata', r, { once: true }));
@@ -490,7 +508,7 @@
       det.width = Math.round(vw * s); det.height = Math.round(vh * s);
       dctx.drawImage(video, 0, 0, det.width, det.height);
       let q = null;
-      try { q = detectQuad(det); } catch (e) { /* frame inválido */ }
+      q = safeDetect(det);
       if (q) q = q.map(p => ({ x: p.x / s, y: p.y / s }));
 
       if (q && lastQ) {
@@ -501,7 +519,7 @@
       lastQ = q;
 
       drawOverlay(q, Math.min(stable / 7, 1));
-      $('scanHint').textContent = !q ? 'Buscando la planilla…' : autoOn ? (stable > 1 ? 'No te muevas…' : 'Planilla detectada') : 'Planilla detectada: tocá el botón amarillo';
+      $('scanHint').textContent = !cvReady() ? 'Encuadrá la planilla y tocá el botón verde' : !q ? 'Buscando la planilla…' : autoOn ? (stable > 1 ? 'No te muevas…' : 'Planilla detectada') : 'Planilla detectada: tocá el botón verde';
 
       if (autoOn && q && stable >= 7) return capture();
       timer = setTimeout(loop, 110);
@@ -536,24 +554,45 @@
     $('btnAuto').onclick = e => { autoOn = !autoOn; e.currentTarget.setAttribute('aria-pressed', autoOn); stable = 0; };
     $('btnCloseCam').onclick = () => { stopCamera(); state.pages.length ? openPages() : openForm(); };
 
+    async function decodeImage(file) {
+      // createImageBitmap respeta la orientación EXIF; si no está, se usa <img>
+      if (window.createImageBitmap) {
+        try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { /* sigue */ }
+      }
+      const url = URL.createObjectURL(file);
+      try {
+        return await new Promise((res, rej) => {
+          const i = new Image();
+          i.onload = () => res(i);
+          i.onerror = () => rej(new Error('No se pudo leer esa imagen. Si es un archivo HEIC, elegila desde Fotos (no desde Archivos) o mandá una captura.'));
+          i.src = url;
+        });
+      } finally { setTimeout(() => URL.revokeObjectURL(url), 30000); }
+    }
+
     $('fileInput').addEventListener('change', async e => {
-      const file = e.target.files[0]; e.target.value = '';
+      const file = e.target.files && e.target.files[0]; e.target.value = '';
       if (!file) return;
       $('camLoading').classList.remove('hidden');
       $('camLoadingText').textContent = 'Procesando imagen';
+      await new Promise(r => setTimeout(r, 30)); // deja pintar el aviso
       try {
-        await loadCV();
-        const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('No se pudo leer esa imagen. Probá con otra foto.')); i.src = URL.createObjectURL(file); });
-        const k = Math.min(1, 3000 / Math.max(img.naturalWidth, img.naturalHeight));
+        const img = await decodeImage(file);
+        const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+        if (!iw || !ih) throw new Error('No se pudo leer esa imagen. Probá con otra foto.');
+        const k = Math.min(1, 2600 / Math.max(iw, ih));
         const c = document.createElement('canvas');
-        c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+        c.width = Math.round(iw * k); c.height = Math.round(ih * k);
         c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-        URL.revokeObjectURL(img.src);
-        const s = 420 / Math.max(c.width, c.height);
-        det.width = Math.round(c.width * s); det.height = Math.round(c.height * s);
-        dctx.drawImage(c, 0, 0, det.width, det.height);
-        let q = detectQuad(det);
-        if (q) q = q.map(p => ({ x: p.x / s, y: p.y / s }));
+        if (img.close) img.close();
+        let q = null;
+        if (await cvWithin(15000)) {
+          const s = 420 / Math.max(c.width, c.height);
+          det.width = Math.round(c.width * s); det.height = Math.round(c.height * s);
+          dctx.drawImage(c, 0, 0, det.width, det.height);
+          q = safeDetect(det);
+          if (q) q = q.map(p => ({ x: p.x / s, y: p.y / s }));
+        }
         stopCamera();
         openCrop(c, q);
       } catch (err) {
@@ -634,8 +673,11 @@
       drawCrop();
     };
     $('btnRetake').onclick = () => openCamera();
-    $('btnCrop').onclick = () => {
-      state.warped = warp(state.capture, orderPts(state.quad));
+    $('btnCrop').onclick = async () => {
+      const b = $('btnCrop'); b.disabled = true; b.innerHTML = '<span class="spinner"></span> PROCESANDO';
+      await new Promise(r => setTimeout(r, 30));
+      try { state.warped = warp(state.capture, orderPts(state.quad)); }
+      finally { b.disabled = false; b.textContent = 'RECORTAR'; }
       state.rotation = 0;
       state.filter = 'scan';
       setFilterChips();
@@ -643,49 +685,135 @@
       show('s-enhance');
     };
 
-    /* ---------- Procesamiento ---------- */
+    /* ---------- Procesamiento (JavaScript puro, no depende de OpenCV) ---------- */
+    // Homografía que lleva el rectángulo destino (0,0)-(w,h) a las 4 esquinas de la foto.
+    function homography(w, h, q) {
+      const dst = [[0, 0], [w, 0], [w, h], [0, h]], A = [], B = [];
+      for (let i = 0; i < 4; i++) {
+        const [x, y] = dst[i], u = q[i].x, v = q[i].y;
+        A.push([x, y, 1, 0, 0, 0, -x * u, -y * u]); B.push(u);
+        A.push([0, 0, 0, x, y, 1, -x * v, -y * v]); B.push(v);
+      }
+      for (let c = 0; c < 8; c++) { // eliminación de Gauss
+        let p = c; for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+        [A[c], A[p]] = [A[p], A[c]]; [B[c], B[p]] = [B[p], B[c]];
+        for (let r = 0; r < 8; r++) if (r !== c) {
+          const f = A[r][c] / A[c][c];
+          for (let k = c; k < 8; k++) A[r][k] -= f * A[c][k];
+          B[r] -= f * B[c];
+        }
+      }
+      return B.map((b, i) => b / A[i][i]);
+    }
+
     function warp(srcCanvas, q) {
-      const cv = window.cv, [tl, tr, br, bl] = q, D = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      const [tl, tr, br, bl] = q, D = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
       let w = Math.max(D(tl, tr), D(bl, br)), h = Math.max(D(tl, bl), D(tr, br));
-      const k = Math.min(1, 2200 / Math.max(w, h));
+      const k = Math.min(1, 2000 / Math.max(w, h));
       w = Math.max(10, Math.round(w * k)); h = Math.max(10, Math.round(h * k));
-      const src = cv.imread(srcCanvas), dst = new cv.Mat();
-      const sp = cv.matFromArray(4, 1, cv.CV_32FC2, [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]);
-      const dp = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, w, 0, w, h, 0, h]);
-      const M = cv.getPerspectiveTransform(sp, dp);
-      cv.warpPerspective(src, dst, M, new cv.Size(w, h), cv.INTER_LINEAR, cv.BORDER_REPLICATE, new cv.Scalar());
-      const out = document.createElement('canvas');
-      cv.imshow(out, dst);
-      [src, dst, sp, dp, M].forEach(m => m.delete());
+      const [a, b, c, d, e, f, g, hh] = homography(w, h, q);
+      const sw = srcCanvas.width, sh = srcCanvas.height;
+      const src = srcCanvas.getContext('2d').getImageData(0, 0, sw, sh).data;
+      const out = document.createElement('canvas'); out.width = w; out.height = h;
+      const octx2 = out.getContext('2d'), od = octx2.createImageData(w, h), o = od.data;
+      let i = 0;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++, i += 4) {
+          const den = g * x + hh * y + 1;
+          let sx = (a * x + b * y + c) / den, sy = (d * x + e * y + f) / den;
+          sx = sx < 0 ? 0 : sx > sw - 1.001 ? sw - 1.001 : sx;
+          sy = sy < 0 ? 0 : sy > sh - 1.001 ? sh - 1.001 : sy;
+          const x0 = sx | 0, y0 = sy | 0, fx = sx - x0, fy = sy - y0;
+          const p00 = (y0 * sw + x0) * 4, p10 = p00 + 4, p01 = p00 + sw * 4, p11 = p01 + 4;
+          const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
+          o[i]     = src[p00] * w00 + src[p10] * w10 + src[p01] * w01 + src[p11] * w11;
+          o[i + 1] = src[p00 + 1] * w00 + src[p10 + 1] * w10 + src[p01 + 1] * w01 + src[p11 + 1] * w11;
+          o[i + 2] = src[p00 + 2] * w00 + src[p10 + 2] * w10 + src[p01 + 2] * w01 + src[p11 + 2] * w11;
+          o[i + 3] = 255;
+        }
+      }
+      octx2.putImageData(od, 0, 0);
       return out;
     }
 
-    function applyFilter(canvas, mode) {
-      const cv = window.cv;
-      const src = cv.imread(canvas), out = new cv.Mat();
-      try {
-        if (mode === 'color') {
-          src.convertTo(out, -1, 1.12, 8);
-        } else {
-          const g = new cv.Mat(), bg = new cv.Mat();
-          cv.cvtColor(src, g, cv.COLOR_RGBA2GRAY);
-          if (mode === 'bw') {
-            cv.GaussianBlur(g, g, new cv.Size(3, 3), 0);
-            cv.adaptiveThreshold(g, out, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 31, 12);
-          } else {
-            // "Escáner": quita sombras dividiendo por el fondo estimado y sube el contraste
-            const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(15, 15));
-            cv.dilate(g, bg, k); k.delete();
-            cv.GaussianBlur(bg, bg, new cv.Size(51, 51), 0);
-            cv.divide(g, bg, out, 255);
-            out.convertTo(out, -1, 1.35, -85);
+    function toGray(d, n) {
+      const g = new Uint8ClampedArray(n);
+      for (let i = 0, j = 0; i < n; i++, j += 4) g[i] = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8;
+      return g;
+    }
+
+    // Estima el fondo del papel (máximos por bloque, suavizados) para quitar sombras.
+    function paperBackground(g, w, h) {
+      const B = 24, bw = Math.ceil(w / B), bh = Math.ceil(h / B);
+      let m = new Float32Array(bw * bh);
+      for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+        let mx = 0;
+        const y1 = Math.min(h, (by + 1) * B), x1 = Math.min(w, (bx + 1) * B);
+        for (let y = by * B; y < y1; y += 2) for (let x = bx * B; x < x1; x += 2) { const v = g[y * w + x]; if (v > mx) mx = v; }
+        m[by * bw + bx] = mx;
+      }
+      for (let pass = 0; pass < 2; pass++) { // suavizado 3x3
+        const t = new Float32Array(m.length);
+        for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+          let s = 0, n = 0;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+            const yy = y + dy, xx = x + dx;
+            if (yy >= 0 && yy < bh && xx >= 0 && xx < bw) { s += m[yy * bw + xx]; n++; }
           }
-          g.delete(); bg.delete();
+          t[y * bw + x] = s / n;
         }
-        const c = document.createElement('canvas');
-        cv.imshow(c, out);
-        return c;
-      } finally { src.delete(); out.delete(); }
+        m = t;
+      }
+      return { m, bw, bh, B };
+    }
+
+    function applyFilter(canvas, mode) {
+      const w = canvas.width, h = canvas.height, n = w * h;
+      const ctx = canvas.getContext('2d'), id = ctx.getImageData(0, 0, w, h), d = id.data;
+      const out = document.createElement('canvas'); out.width = w; out.height = h;
+      const od = new ImageData(w, h), o = od.data;
+      if (mode === 'color') {
+        for (let i = 0; i < d.length; i += 4) {
+          o[i] = d[i] * 1.12 + 8; o[i + 1] = d[i + 1] * 1.12 + 8; o[i + 2] = d[i + 2] * 1.12 + 8; o[i + 3] = 255;
+        }
+      } else {
+        const g = toGray(d, n);
+        let res;
+        if (mode === 'bw') {
+          // Umbral adaptativo con imagen integral (ventana 31 px, C = 12)
+          const W = w + 1, I = new Uint32Array(W * (h + 1)), r = 15;
+          for (let y = 1; y <= h; y++) {
+            let row = 0;
+            for (let x = 1; x <= w; x++) { row += g[(y - 1) * w + x - 1]; I[y * W + x] = I[(y - 1) * W + x] + row; }
+          }
+          res = new Uint8ClampedArray(n);
+          for (let y = 0; y < h; y++) {
+            const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+            for (let x = 0; x < w; x++) {
+              const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
+              const sum = I[y1 * W + x1] - I[y0 * W + x1] - I[y1 * W + x0] + I[y0 * W + x0];
+              const mean = sum / ((y1 - y0) * (x1 - x0));
+              res[y * w + x] = g[y * w + x] > mean - 12 ? 255 : 0;
+            }
+          }
+        } else {
+          // "Escáner": divide por el fondo del papel (quita sombras) y sube el contraste
+          const { m, bw, bh, B } = paperBackground(g, w, h);
+          res = new Uint8ClampedArray(n);
+          for (let y = 0; y < h; y++) {
+            const gy = Math.min(bh - 1.001, Math.max(0, y / B - 0.5)), y0 = gy | 0, fy = gy - y0, y1 = Math.min(bh - 1, y0 + 1);
+            for (let x = 0; x < w; x++) {
+              const gx = Math.min(bw - 1.001, Math.max(0, x / B - 0.5)), x0 = gx | 0, fx = gx - x0, x1 = Math.min(bw - 1, x0 + 1);
+              const bg = (m[y0 * bw + x0] * (1 - fx) + m[y0 * bw + x1] * fx) * (1 - fy) + (m[y1 * bw + x0] * (1 - fx) + m[y1 * bw + x1] * fx) * fy;
+              const v = g[y * w + x] * 255 / Math.max(bg, 40);
+              res[y * w + x] = v * 1.35 - 85;
+            }
+          }
+        }
+        for (let i = 0, j = 0; i < n; i++, j += 4) { o[j] = o[j + 1] = o[j + 2] = res[i]; o[j + 3] = 255; }
+      }
+      out.getContext('2d').putImageData(od, 0, 0);
+      return out;
     }
 
     function rotateCanvas(c, deg) {
