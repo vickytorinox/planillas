@@ -366,17 +366,25 @@
     function loadCV() {
       if (cvPromise) return cvPromise;
       cvPromise = new Promise((resolve, reject) => {
-        const ready = () => resolve(window.cv);
+        let finished = false, poll = null, limit = null;
+        const finish = (err) => {
+          if (finished) return; finished = true;
+          clearInterval(poll); clearTimeout(limit);
+          if (err) { cvPromise = null; reject(err); } else resolve(true); // nunca resolver con el módulo (es "thenable" y cuelga la página)
+        };
+        const isReady = () => !!(window.cv && typeof window.cv.Mat === 'function');
+        if (isReady()) return finish();
         const s = document.createElement('script');
         s.src = OPENCV_URL; s.async = true;
         s.onload = () => {
           const c = window.cv;
-          if (c && typeof c.then === 'function') c.then(m => { window.cv = m; ready(); });
-          else if (c && c.Mat) ready();
-          else if (c) c.onRuntimeInitialized = ready;
-          else reject(new Error('No se pudo iniciar el escáner.'));
+          if (!c) return finish(new Error('No se pudo iniciar el escáner.'));
+          if (c instanceof Promise) c.then(m => { window.cv = m; }, () => finish(new Error('No se pudo iniciar el escáner.')));
+          else if (!isReady()) c.onRuntimeInitialized = () => finish();
+          poll = setInterval(() => { if (isReady()) finish(); }, 150);
         };
-        s.onerror = () => { cvPromise = null; reject(new Error('No se pudo descargar el escáner. Revisá tu conexión.')); };
+        s.onerror = () => finish(new Error('No se pudo descargar el escáner. Revisá tu conexión.'));
+        limit = setTimeout(() => finish(new Error('El escáner tardó demasiado en cargar. Revisá tu conexión e intentá de nuevo.')), 90000);
         document.head.appendChild(s);
       });
       return cvPromise;
@@ -446,9 +454,14 @@
         $('btnShutter').disabled = false;
         loop();
       } catch (err) {
-        $('camLoadingText').textContent = err && err.name === 'NotAllowedError'
-          ? 'Sin permiso para usar la cámara. Habilitala en el navegador o usá Galería.'
-          : (err.message || 'No se pudo abrir la cámara. Probá con Galería.');
+        const name = err && err.name;
+        $('camLoadingText').textContent =
+          (!window.isSecureContext || !navigator.mediaDevices) ? 'La cámara en vivo necesita que el sitio esté en HTTPS. Mientras tanto usá Galería.' :
+          name === 'NotAllowedError' ? 'Sin permiso para usar la cámara. Habilitala en la configuración del navegador o usá Galería.' :
+          (name === 'NotFoundError' || name === 'OverconstrainedError') ? 'No se encontró una cámara. Usá Galería.' :
+          name === 'NotReadableError' ? 'La cámara está en uso por otra app. Cerrala e intentá de nuevo, o usá Galería.' :
+          /escáner/.test(err && err.message || '') ? err.message : 'No se pudo abrir la cámara. Probá con Galería.';
+        $('scanHint').textContent = 'Tocá Galería para elegir una foto de la planilla';
         stopCamera(true);
       }
     }
@@ -526,9 +539,11 @@
     $('fileInput').addEventListener('change', async e => {
       const file = e.target.files[0]; e.target.value = '';
       if (!file) return;
+      $('camLoading').classList.remove('hidden');
+      $('camLoadingText').textContent = 'Procesando imagen';
       try {
         await loadCV();
-        const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
+        const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('No se pudo leer esa imagen. Probá con otra foto.')); i.src = URL.createObjectURL(file); });
         const k = Math.min(1, 3000 / Math.max(img.naturalWidth, img.naturalHeight));
         const c = document.createElement('canvas');
         c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
@@ -541,7 +556,11 @@
         if (q) q = q.map(p => ({ x: p.x / s, y: p.y / s }));
         stopCamera();
         openCrop(c, q);
-      } catch (err) { $('scanHint').textContent = 'No se pudo abrir esa imagen.'; }
+      } catch (err) {
+        $('scanHint').textContent = (err && err.message) ? err.message : 'No se pudo abrir esa imagen. Probá con otra foto.';
+      } finally {
+        $('camLoading').classList.add('hidden');
+      }
     });
 
     /* ---------- Recorte ---------- */
@@ -772,6 +791,9 @@
       local.del('planillas_session'); show('s-login');
     }
   })();
+  </script>
+</body>
+</html>
   </script>
 </body>
 </html>
