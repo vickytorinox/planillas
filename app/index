@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>Planillas · SG APP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="../assets/styles.css">
+  <style>
+    /* ─── ESCÁNER ─── */
+    .scanner { background: #000; position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; color: #f0f0f0; }
+    .scan-top { padding: calc(12px + env(safe-area-inset-top, 0px)) 14px 10px; display: flex; align-items: center; gap: 10px; background: #0a0a0a; border-bottom: 1px solid #2a2a2a; }
+    .scan-top .tape { flex: 1; padding: 6px 10px; background: transparent; border: 0; }
+    .scan-top .tape .ib-value { font-size: 12px; }
+    .scan-stage { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; }
+    .viewfinder { position: relative; max-width: 100%; max-height: 100%; }
+    .viewfinder video, .viewfinder canvas { display: block; width: 100%; height: 100%; }
+    .viewfinder canvas { position: absolute; inset: 0; }
+    .scan-hint { text-align: center; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: #1db954; font-weight: 600; padding: 12px 14px 4px; min-height: 2.6em; }
+    .scan-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 22px calc(22px + env(safe-area-inset-bottom, 0px)); }
+    .scan-bar .side { width: 88px; display: flex; justify-content: center; }
+    .shutter { width: 76px; height: 76px; border-radius: 50%; border: 4px solid #f0f0f0; background: #1db954; box-shadow: inset 0 0 0 4px #000; transition: transform .15s; }
+    .shutter:active { transform: scale(.94); }
+    .shutter:disabled { opacity: .35; }
+    .shutter:focus-visible { outline: 2px solid #1db954; outline-offset: 4px; }
+    .ghost-w { background: #1e1e1e; color: #f0f0f0; border: 1px solid #2a2a2a; border-radius: 8px; padding: 9px 12px; font-family: 'DM Sans', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; }
+    .ghost-w[aria-pressed="true"] { background: rgba(29,185,84,.14); color: #1db954; border-color: #1db954; }
+    .flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .25s; }
+    .flash.on { opacity: .85; transition: none; }
+    #camLoading { position: absolute; color: #888; }
+
+    /* ─── RECORTE / REVISIÓN ─── */
+    .editor { display: flex; justify-content: center; background: #1a1a1a; border-radius: 10px; padding: 10px; }
+    .editor canvas { touch-action: none; border-radius: 4px; max-width: 100%; }
+    .preview { display: flex; justify-content: center; background: #1a1a1a; border-radius: 10px; padding: 12px; }
+    .preview img { max-width: 100%; max-height: 56vh; background: #fff; box-shadow: 0 6px 24px rgba(0,0,0,.4); }
+
+    .pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+    .page { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 6px; }
+    .page img { width: 100%; aspect-ratio: 3 / 4; object-fit: contain; background: #fff; display: block; border-radius: 4px; }
+    .page .n { display: flex; justify-content: space-between; align-items: center; padding: 6px 2px 0; font-family: 'Bebas Neue', sans-serif; font-size: 16px; letter-spacing: 2px; }
+    .page button { background: none; border: 0; color: var(--no); font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; padding: 4px; }
+
+    /* ─── AVISO ÚLTIMA PLANILLA ─── */
+    .notice {
+      background: var(--accent-soft); border: 1px solid rgba(29,185,84,.35); border-radius: 8px;
+      padding: 12px 14px; font-size: 13px; color: #0f5c2a; line-height: 1.45;
+    }
+    .notice .nl { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; font-weight: 600; color: var(--muted); }
+    .notice .nd { font-family: 'Bebas Neue', sans-serif; font-size: 26px; letter-spacing: 2px; color: var(--text); line-height: 1.1; margin-top: 2px; }
+    .notice .nd small { font-family: 'DM Sans', sans-serif; font-size: 12px; letter-spacing: 0; color: var(--muted); margin-left: 6px; }
+    .notice .btn { margin-top: 10px; width: 100%; }
+    .notice.empty { color: var(--muted); }
+
+    /* ─── LISTO ─── */
+    .done { text-align: center; align-items: center; padding-top: 30px; }
+    .done .check { width: 72px; height: 72px; border-radius: 50%; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 36px; }
+    .filename { font-size: 13px; font-weight: 600; word-break: break-word; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; width: 100%; }
+    .done a { font-size: 13px; font-weight: 600; color: var(--accent-dark); }
+    .login-note { font-size: 11px; color: #555; text-align: center; letter-spacing: .5px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="../">SG APP</a>
+    <div class="who hidden" id="who">
+      <div id="whoName"></div>
+      <button class="link" id="btnLogout" type="button">Cerrar sesión</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- 1. Ingreso -->
+    <section id="s-login">
+      <div class="brand-block">
+        <div class="title">PLANILLAS</div>
+        <div class="subtitle">Ingresos y egresos</div>
+      </div>
+      <div class="divider"></div>
+      <form class="panel" id="loginForm" novalidate>
+        <label for="cuil">CUIL del supervisor</label>
+        <input class="big" id="cuil" inputmode="numeric" autocomplete="username" placeholder="20-12345678-9" maxlength="13" required>
+        <div class="msg err hidden" id="loginErr" role="alert"></div>
+        <button class="btn block" type="submit" id="btnLogin">INGRESAR</button>
+      </form>
+      <div class="divider"></div>
+      <p class="login-note">Solo pueden cargar los CUIL habilitados por administración.</p>
+    </section>
+
+    <!-- 2. Datos de la planilla -->
+    <section id="s-form" class="hidden">
+      <h1>Nueva planilla</h1>
+      <form class="panel" id="dataForm" novalidate>
+        <label for="objetivo">Objetivo</label>
+        <select id="objetivo" required></select>
+        <label for="puesto">Puesto</label>
+        <select id="puesto" required></select>
+        <div class="notice hidden" id="lastInfo" aria-live="polite"></div>
+        <label for="fecha">Fecha de la planilla</label>
+        <input type="date" id="fecha" required>
+        <div class="hint">La fecha que figura en la planilla de papel, no la de hoy.</div>
+        <div class="msg warn hidden" id="fechaWarn" role="status"></div>
+        <div class="msg err hidden" id="formErr" role="alert"></div>
+        <button class="btn block" type="submit">ESCANEAR PLANILLA</button>
+      </form>
+      <p class="msg warn" id="emptyCatalog" hidden>No tenés objetivos disponibles. Pedí a administración que cargue objetivos y puestos.</p>
+    </section>
+
+    <!-- 4. Recorte -->
+    <section id="s-crop" class="hidden">
+      <div class="tape" data-tape></div>
+      <div>
+        <h2>Ajustá las esquinas</h2>
+        <p class="muted small">Arrastrá los círculos verdes hasta las 4 esquinas de la planilla.</p>
+      </div>
+      <div class="editor"><canvas id="cropCanvas"></canvas></div>
+      <div class="row">
+        <button class="btn ghost" type="button" id="btnRetake">Volver a escanear</button>
+        <button class="btn ghost" type="button" id="btnFull">Imagen completa</button>
+      </div>
+      <button class="btn block" type="button" id="btnCrop">RECORTAR</button>
+    </section>
+
+    <!-- 5. Mejora -->
+    <section id="s-enhance" class="hidden">
+      <div class="tape" data-tape></div>
+      <h2>Revisá que se lea bien</h2>
+      <div class="preview"><img id="enhImg" alt="Hoja escaneada"></div>
+      <label>Filtro</label>
+      <div class="row" style="align-items:stretch">
+        <div class="chips" role="group" aria-label="Filtro">
+          <button class="chip" type="button" data-filter="scan" aria-pressed="true">ESCÁNER</button>
+          <button class="chip" type="button" data-filter="bw" aria-pressed="false">B / N</button>
+          <button class="chip" type="button" data-filter="color" aria-pressed="false">ORIGINAL</button>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn block" type="button" id="btnAddPage">USAR ESTA HOJA</button>
+        <div class="row">
+          <button class="btn ghost" type="button" id="btnRotate">Girar 90°</button>
+          <button class="btn ghost" type="button" id="btnBackCrop">Ajustar esquinas</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. Hojas -->
+    <section id="s-pages" class="hidden">
+      <div class="tape" data-tape></div>
+      <div>
+        <h2 id="pagesTitle">Hojas escaneadas</h2>
+        <p class="muted small">Si la planilla tiene más de una hoja, agregalas antes de subir.</p>
+      </div>
+      <div class="pages" id="pages"></div>
+      <div class="actions">
+        <button class="btn block" type="button" id="btnUpload">SUBIR PLANILLA</button>
+        <button class="btn ghost block" type="button" id="btnMore">Escanear otra hoja</button>
+        <button class="btn danger block" type="button" id="btnDiscard">Descartar y empezar de nuevo</button>
+      </div>
+      <div class="loading hidden" id="uploading"><span class="spinner"></span>Subiendo planilla</div>
+      <div class="msg err hidden" id="uploadErr" role="alert"></div>
+    </section>
+
+    <!-- 7. Listo -->
+    <section id="s-done" class="hidden done">
+      <div class="check" aria-hidden="true">✓</div>
+      <h1>Planilla subida</h1>
+      <p class="filename" id="doneName"></p>
+      <a id="doneLink" target="_blank" rel="noopener">Ver en Drive</a>
+      <button class="btn block" type="button" id="btnAnother">CARGAR OTRA PLANILLA</button>
+    </section>
+  </main>
+
+  <!-- 3. Escáner (pantalla completa) -->
+  <div class="scanner hidden" id="s-camera" role="dialog" aria-label="Escáner">
+    <div class="scan-top">
+      <div class="tape" data-tape></div>
+      <button class="ghost-w" type="button" id="btnCloseCam">Cancelar</button>
+    </div>
+    <div class="scan-stage" id="stage">
+      <div class="viewfinder" id="viewfinder">
+        <video id="video" playsinline muted autoplay></video>
+        <canvas id="overlay"></canvas>
+        <div class="flash" id="flash"></div>
+      </div>
+      <div class="loading hidden" id="camLoading"><span class="spinner"></span><span id="camLoadingText">Preparando escáner</span></div>
+    </div>
+    <div class="scan-hint" id="scanHint" aria-live="polite">Apuntá a la planilla sobre una superficie oscura</div>
+    <div class="scan-bar">
+      <div class="side"><button class="ghost-w" type="button" id="btnAuto" aria-pressed="true">Auto</button></div>
+      <button class="shutter" type="button" id="btnShutter" aria-label="Escanear" disabled></button>
+      <div class="side">
+        <label class="ghost-w" style="margin:0;cursor:pointer;letter-spacing:1.5px;color:#f0f0f0">Galería<input type="file" accept="image/*" id="fileInput" hidden></label>
+      </div>
+    </div>
+  </div>
+
+  <script src="../assets/config.js"></script>
+  <script src="../assets/api.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script>
+  (function () {
+    const OPENCV_URL = 'https://docs.opencv.org/4.10.0/opencv.js';
+    const $ = id => document.getElementById(id);
+    const local = store('local');
+
+    const state = {
+      session: null,      // { token, nombre, cuil, objetivos, exp }
+      sel: null,          // { objetivoId, objetivo, puestoId, puesto, fecha }
+      pages: [],          // [{ url, w, h }]
+      capture: null,      // canvas con la foto completa
+      quad: null,         // 4 esquinas en coords de la imagen
+      warped: null,       // canvas recortado
+      filter: 'scan',
+      rotation: 0,
+      enhanced: null      // { url, w, h }
+    };
+
+    /* ---------- Navegación ---------- */
+    const SCREENS = ['s-login', 's-form', 's-crop', 's-enhance', 's-pages', 's-done'];
+    function show(id) {
+      SCREENS.forEach(s => $(s).classList.toggle('hidden', s !== id));
+      document.body.classList.toggle('day', id !== 's-login' && id !== 's-camera');
+      $('s-camera').classList.toggle('hidden', id !== 's-camera');
+      window.scrollTo(0, 0);
+    }
+    function setErr(el, msg) { el.textContent = msg || ''; el.classList.toggle('hidden', !msg); }
+    function handleAuth(err) {
+      if (err && err.code === 'AUTH') { logout(); setErr($('loginErr'), err.message); return true; }
+      return false;
+    }
+
+    /* ---------- Sesión ---------- */
+    function saveSession(s) { state.session = s; local.set('planillas_session', s); renderWho(); }
+    function renderWho() {
+      const s = state.session;
+      $('who').classList.toggle('hidden', !s);
+      if (s) $('whoName').textContent = s.nombre;
+    }
+    function logout() {
+      state.session = null; local.del('planillas_session'); renderWho();
+      state.pages = []; show('s-login');
+    }
+    $('btnLogout').onclick = logout;
+
+    $('cuil').addEventListener('input', e => {
+      const d = e.target.value.replace(/\D/g, '').slice(0, 11);
+      e.target.value = d.length > 10 ? fmtCuil(d) : d.length > 2 ? d.slice(0, 2) + '-' + d.slice(2) : d;
+    });
+
+    $('loginForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const cuil = $('cuil').value.replace(/\D/g, '');
+      if (cuil.length !== 11) return setErr($('loginErr'), 'El CUIL tiene 11 números.');
+      setErr($('loginErr'));
+      const b = $('btnLogin'); b.disabled = true; b.innerHTML = '<span class="spinner"></span> VERIFICANDO';
+      try {
+        const r = await api('login', { cuil });
+        local.set('planillas_last_cuil', cuil);
+        saveSession({ token: r.token, nombre: r.nombre, cuil, objetivos: r.objetivos, exp: Date.now() + 5.5 * 3600e3 });
+        openForm();
+        loadCV().catch(() => {}); // precarga el escáner
+      } catch (err) {
+        setErr($('loginErr'), err.message);
+      } finally { b.disabled = false; b.textContent = 'INGRESAR'; }
+    });
+
+    /* ---------- Formulario ---------- */
+    function openForm() {
+      const objs = state.session.objetivos || [];
+      const last = local.get('planillas_last_sel') || {};
+      const so = $('objetivo');
+      so.innerHTML = '<option value="">Elegí el objetivo</option>' +
+        objs.map(o => `<option value="${esc(o.id)}">${esc(o.nombre)}</option>`).join('');
+      if (objs.some(o => o.id === last.objetivoId)) so.value = last.objetivoId;
+      const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+      $('fecha').max = today;
+      $('fecha').value = '';
+      fillPuestos(last.puestoId);
+      $('emptyCatalog').hidden = objs.length > 0;
+      setErr($('formErr'));
+      show('s-form');
+    }
+    function fillPuestos(selectId) {
+      const o = (state.session.objetivos || []).find(x => x.id === $('objetivo').value);
+      const sp = $('puesto');
+      sp.innerHTML = '<option value="">' + (o ? 'Elegí el puesto' : 'Primero elegí el objetivo') + '</option>' +
+        (o ? o.puestos.map(p => `<option value="${esc(p.id)}">${esc(p.nombre)}</option>`).join('') : '');
+      sp.disabled = !o;
+      if (o && o.puestos.some(p => p.id === selectId)) sp.value = selectId;
+      else if (o && o.puestos.length === 1) sp.value = o.puestos[0].id;
+      renderLast();
+    }
+    $('objetivo').addEventListener('change', () => fillPuestos());
+    $('puesto').addEventListener('change', renderLast);
+    $('fecha').addEventListener('change', checkFecha);
+
+    function currentPuesto() {
+      const o = (state.session.objetivos || []).find(x => x.id === $('objetivo').value);
+      return o && o.puestos.find(x => x.id === $('puesto').value);
+    }
+    function addDays(iso, n) {
+      const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n);
+      return d.toISOString().slice(0, 10);
+    }
+    function diaSemana(iso) {
+      return new Date(iso + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long' });
+    }
+
+    // Cartel con la última planilla cargada del puesto elegido
+    function renderLast() {
+      const box = $('lastInfo'), p = currentPuesto();
+      checkFecha();
+      if (!p) { box.classList.add('hidden'); return; }
+      box.classList.remove('hidden');
+      box.classList.toggle('empty', !p.ultima);
+      if (!p.ultima) { box.innerHTML = '<div class="nl">Última planilla cargada</div>Este puesto todavía no tiene planillas cargadas.'; return; }
+      const sig = addDays(p.ultima, 1), hoy = $('fecha').max;
+      const dias = Math.round((new Date(hoy + 'T12:00:00') - new Date(p.ultima + 'T12:00:00')) / 864e5);
+      const hace = dias === 0 ? 'hoy' : dias === 1 ? 'ayer' : 'hace ' + dias + ' días';
+      box.innerHTML = `<div class="nl">Última planilla cargada de este puesto</div>` +
+        `<div class="nd">${diaSemana(p.ultima)} ${fmtFecha(p.ultima)}<small>${hace}</small></div>` +
+        (sig <= hoy ? `<button class="btn sm" type="button" id="btnNextDay">CARGAR EL ${diaSemana(sig).toUpperCase()} ${fmtFecha(sig).slice(0, 5)}</button>` : '');
+      const b = $('btnNextDay');
+      if (b) b.onclick = () => { $('fecha').value = sig; checkFecha(); };
+    }
+
+    function checkFecha() {
+      const p = currentPuesto(), f = $('fecha').value, w = $('fechaWarn');
+      if (p && p.ultima && f && f === p.ultima) setErr(w, 'Ya hay una planilla cargada de ese día para este puesto. Si la subís de nuevo se guarda como copia.');
+      else if (p && p.ultima && f && f < p.ultima) setErr(w, 'Esa fecha es anterior a la última planilla cargada. Revisá que no esté repetida.');
+      else setErr(w);
+    }
+
+    $('dataForm').addEventListener('submit', e => {
+      e.preventDefault();
+      const o = state.session.objetivos.find(x => x.id === $('objetivo').value);
+      const p = o && o.puestos.find(x => x.id === $('puesto').value);
+      const f = $('fecha').value;
+      if (!o) return setErr($('formErr'), 'Elegí el objetivo.');
+      if (!p) return setErr($('formErr'), 'Elegí el puesto.');
+      if (!f) return setErr($('formErr'), 'Poné la fecha de la planilla.');
+      if (f > $('fecha').max) return setErr($('formErr'), 'La fecha no puede ser posterior a hoy.');
+      setErr($('formErr'));
+      state.sel = { objetivoId: o.id, objetivo: o.nombre, puestoId: p.id, puesto: p.nombre, fecha: f };
+      local.set('planillas_last_sel', { objetivoId: o.id, puestoId: p.id });
+      state.pages = [];
+      renderTape();
+      openCamera();
+    });
+
+    function renderTape() {
+      const s = state.sel; if (!s) return;
+      document.querySelectorAll('[data-tape]').forEach(el => {
+        el.innerHTML =
+          `<div><div class="ib-label">Objetivo</div><div class="ib-value">${esc(s.objetivo)}</div></div>` +
+          `<div><div class="ib-label">Puesto</div><div class="ib-value">${esc(s.puesto)}</div></div>` +
+          `<div><div class="ib-label">Fecha</div><div class="ib-value">${fmtFecha(s.fecha)}</div></div>`;
+      });
+    }
+
+    /* ---------- OpenCV ---------- */
+    let cvPromise = null;
+    function loadCV() {
+      if (cvPromise) return cvPromise;
+      cvPromise = new Promise((resolve, reject) => {
+        const ready = () => resolve(window.cv);
+        const s = document.createElement('script');
+        s.src = OPENCV_URL; s.async = true;
+        s.onload = () => {
+          const c = window.cv;
+          if (c && typeof c.then === 'function') c.then(m => { window.cv = m; ready(); });
+          else if (c && c.Mat) ready();
+          else if (c) c.onRuntimeInitialized = ready;
+          else reject(new Error('No se pudo iniciar el escáner.'));
+        };
+        s.onerror = () => { cvPromise = null; reject(new Error('No se pudo descargar el escáner. Revisá tu conexión.')); };
+        document.head.appendChild(s);
+      });
+      return cvPromise;
+    }
+
+    function orderPts(pts) {
+      const bySum = [...pts].sort((a, b) => (a.x + a.y) - (b.x + b.y));
+      const byDiff = [...pts].sort((a, b) => (a.y - a.x) - (b.y - b.x));
+      return [bySum[0], byDiff[0], bySum[3], byDiff[3]]; // tl, tr, br, bl
+    }
+
+    // Busca el cuadrilátero más grande (la hoja) en un canvas chico.
+    function detectQuad(canvas) {
+      const cv = window.cv;
+      const src = cv.imread(canvas), gray = new cv.Mat(), edges = new cv.Mat();
+      const contours = new cv.MatVector(), hier = new cv.Mat();
+      let best = null, bestArea = canvas.width * canvas.height * 0.18;
+      try {
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+        cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+        cv.Canny(gray, edges, 40, 140);
+        const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+        cv.dilate(edges, edges, k); k.delete();
+        cv.findContours(edges, contours, hier, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+        for (let i = 0; i < contours.size(); i++) {
+          const c = contours.get(i), approx = new cv.Mat();
+          const peri = cv.arcLength(c, true);
+          cv.approxPolyDP(c, approx, 0.02 * peri, true);
+          if (approx.rows === 4 && cv.isContourConvex(approx)) {
+            const area = cv.contourArea(approx);
+            if (area > bestArea) {
+              bestArea = area;
+              const d = approx.data32S;
+              best = [0, 1, 2, 3].map(j => ({ x: d[j * 2], y: d[j * 2 + 1] }));
+            }
+          }
+          approx.delete(); c.delete();
+        }
+      } finally { [src, gray, edges, contours, hier].forEach(m => m.delete()); }
+      return best ? orderPts(best) : null;
+    }
+
+    /* ---------- Cámara ---------- */
+    let stream = null, timer = null, lastQ = null, stable = 0, autoOn = true, busy = false;
+    const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
+    const det = document.createElement('canvas'), dctx = det.getContext('2d', { willReadFrequently: true });
+
+    async function openCamera() {
+      show('s-camera');
+      $('btnShutter').disabled = true;
+      $('camLoading').classList.remove('hidden');
+      $('camLoadingText').textContent = 'Preparando escáner';
+      $('scanHint').textContent = 'Apuntá a la planilla sobre una superficie oscura';
+      lastQ = null; stable = 0; busy = false;
+      try {
+        const camP = navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1440 } }
+        });
+        const [s] = await Promise.all([camP, loadCV()]);
+        stream = s;
+        video.srcObject = stream;
+        await video.play();
+        await new Promise(r => video.videoWidth ? r() : video.addEventListener('loadedmetadata', r, { once: true }));
+        fitViewfinder();
+        $('camLoading').classList.add('hidden');
+        $('btnShutter').disabled = false;
+        loop();
+      } catch (err) {
+        $('camLoadingText').textContent = err && err.name === 'NotAllowedError'
+          ? 'Sin permiso para usar la cámara. Habilitala en el navegador o usá Galería.'
+          : (err.message || 'No se pudo abrir la cámara. Probá con Galería.');
+        stopCamera(true);
+      }
+    }
+
+    function fitViewfinder() {
+      const vw = video.videoWidth, vh = video.videoHeight, st = $('stage');
+      overlay.width = vw; overlay.height = vh;
+      const scale = Math.min(st.clientWidth / vw, st.clientHeight / vh);
+      $('viewfinder').style.width = Math.floor(vw * scale) + 'px';
+      $('viewfinder').style.height = Math.floor(vh * scale) + 'px';
+    }
+    window.addEventListener('resize', () => { if (stream && video.videoWidth) fitViewfinder(); });
+
+    function stopCamera(keepScreen) {
+      clearTimeout(timer); timer = null;
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      stream = null; video.srcObject = null;
+      octx.clearRect(0, 0, overlay.width, overlay.height);
+      if (!keepScreen) $('s-camera').classList.add('hidden');
+    }
+
+    function loop() {
+      if (!stream) return;
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const s = 420 / Math.max(vw, vh);
+      det.width = Math.round(vw * s); det.height = Math.round(vh * s);
+      dctx.drawImage(video, 0, 0, det.width, det.height);
+      let q = null;
+      try { q = detectQuad(det); } catch (e) { /* frame inválido */ }
+      if (q) q = q.map(p => ({ x: p.x / s, y: p.y / s }));
+
+      if (q && lastQ) {
+        const tol = 0.025 * Math.max(vw, vh);
+        const moved = Math.max(...q.map((p, i) => Math.hypot(p.x - lastQ[i].x, p.y - lastQ[i].y)));
+        stable = moved < tol ? stable + 1 : 0;
+      } else stable = 0;
+      lastQ = q;
+
+      drawOverlay(q, Math.min(stable / 7, 1));
+      $('scanHint').textContent = !q ? 'Buscando la planilla…' : autoOn ? (stable > 1 ? 'No te muevas…' : 'Planilla detectada') : 'Planilla detectada: tocá el botón amarillo';
+
+      if (autoOn && q && stable >= 7) return capture();
+      timer = setTimeout(loop, 110);
+    }
+
+    function drawOverlay(q, progress) {
+      octx.clearRect(0, 0, overlay.width, overlay.height);
+      if (!q) return;
+      const lw = Math.max(overlay.width, overlay.height) / 160;
+      octx.beginPath();
+      q.forEach((p, i) => i ? octx.lineTo(p.x, p.y) : octx.moveTo(p.x, p.y));
+      octx.closePath();
+      octx.fillStyle = `rgba(29,185,84,${0.12 + 0.25 * progress})`;
+      octx.fill();
+      octx.lineWidth = lw; octx.strokeStyle = '#1db954'; octx.stroke();
+    }
+
+    async function capture() {
+      if (busy || !stream) return; busy = true;
+      clearTimeout(timer);
+      const f = $('flash'); f.classList.add('on'); setTimeout(() => f.classList.remove('on'), 60);
+      if (navigator.vibrate) navigator.vibrate(40);
+      const c = document.createElement('canvas');
+      c.width = video.videoWidth; c.height = video.videoHeight;
+      c.getContext('2d').drawImage(video, 0, 0);
+      const q = lastQ;
+      stopCamera();
+      openCrop(c, q);
+    }
+
+    $('btnShutter').onclick = capture;
+    $('btnAuto').onclick = e => { autoOn = !autoOn; e.currentTarget.setAttribute('aria-pressed', autoOn); stable = 0; };
+    $('btnCloseCam').onclick = () => { stopCamera(); state.pages.length ? openPages() : openForm(); };
+
+    $('fileInput').addEventListener('change', async e => {
+      const file = e.target.files[0]; e.target.value = '';
+      if (!file) return;
+      try {
+        await loadCV();
+        const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
+        const k = Math.min(1, 3000 / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(img.src);
+        const s = 420 / Math.max(c.width, c.height);
+        det.width = Math.round(c.width * s); det.height = Math.round(c.height * s);
+        dctx.drawImage(c, 0, 0, det.width, det.height);
+        let q = detectQuad(det);
+        if (q) q = q.map(p => ({ x: p.x / s, y: p.y / s }));
+        stopCamera();
+        openCrop(c, q);
+      } catch (err) { $('scanHint').textContent = 'No se pudo abrir esa imagen.'; }
+    });
+
+    /* ---------- Recorte ---------- */
+    const cc = $('cropCanvas'), cctx = cc.getContext('2d');
+    let cropScale = 1, drag = -1;
+    const dpr = () => window.devicePixelRatio || 1;
+
+    function defaultQuad(w, h) {
+      const m = 0.06;
+      return [{ x: w * m, y: h * m }, { x: w * (1 - m), y: h * m }, { x: w * (1 - m), y: h * (1 - m) }, { x: w * m, y: h * (1 - m) }];
+    }
+
+    function openCrop(canvas, q) {
+      state.capture = canvas;
+      state.quad = q || defaultQuad(canvas.width, canvas.height);
+      show('s-crop');
+      const maxW = Math.min(document.querySelector('.wrap').clientWidth - 36, 900);
+      const maxH = window.innerHeight * 0.6;
+      const s = Math.min(maxW / canvas.width, maxH / canvas.height);
+      cc.style.width = Math.round(canvas.width * s) + 'px';
+      cc.style.height = Math.round(canvas.height * s) + 'px';
+      cropScale = s * dpr();
+      cc.width = Math.round(canvas.width * cropScale);
+      cc.height = Math.round(canvas.height * cropScale);
+      drawCrop();
+    }
+
+    function drawCrop() {
+      const q = state.quad, s = cropScale;
+      cctx.clearRect(0, 0, cc.width, cc.height);
+      cctx.drawImage(state.capture, 0, 0, cc.width, cc.height);
+      // oscurece lo que queda afuera
+      cctx.save();
+      cctx.beginPath(); cctx.rect(0, 0, cc.width, cc.height);
+      q.slice().reverse().forEach((p, i) => i ? cctx.lineTo(p.x * s, p.y * s) : cctx.moveTo(p.x * s, p.y * s));
+      cctx.closePath(); cctx.fillStyle = 'rgba(0,0,0,.5)'; cctx.fill('evenodd');
+      cctx.restore();
+      cctx.beginPath();
+      q.forEach((p, i) => i ? cctx.lineTo(p.x * s, p.y * s) : cctx.moveTo(p.x * s, p.y * s));
+      cctx.closePath(); cctx.lineWidth = 3 * dpr(); cctx.strokeStyle = '#1db954'; cctx.stroke();
+      q.forEach(p => {
+        cctx.beginPath(); cctx.arc(p.x * s, p.y * s, 13 * dpr(), 0, Math.PI * 2);
+        cctx.fillStyle = 'rgba(29,185,84,.95)'; cctx.fill();
+        cctx.lineWidth = 3 * dpr(); cctx.strokeStyle = '#ffffff'; cctx.stroke();
+      });
+    }
+
+    function evtPt(e) {
+      const r = cc.getBoundingClientRect();
+      return { x: (e.clientX - r.left) * (cc.width / r.width) / cropScale, y: (e.clientY - r.top) * (cc.height / r.height) / cropScale };
+    }
+    cc.addEventListener('pointerdown', e => {
+      const p = evtPt(e), hit = 34 * dpr() / cropScale;
+      let best = -1, bd = Infinity;
+      state.quad.forEach((q, i) => { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = i; } });
+      if (bd <= hit * 1.6) { drag = best; cc.setPointerCapture(e.pointerId); }
+    });
+    cc.addEventListener('pointermove', e => {
+      if (drag < 0) return;
+      const p = evtPt(e);
+      state.quad[drag] = { x: Math.max(0, Math.min(state.capture.width, p.x)), y: Math.max(0, Math.min(state.capture.height, p.y)) };
+      drawCrop();
+    });
+    const endDrag = () => { drag = -1; };
+    cc.addEventListener('pointerup', endDrag);
+    cc.addEventListener('pointercancel', endDrag);
+
+    $('btnFull').onclick = () => {
+      const w = state.capture.width, h = state.capture.height;
+      state.quad = [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }];
+      drawCrop();
+    };
+    $('btnRetake').onclick = () => openCamera();
+    $('btnCrop').onclick = () => {
+      state.warped = warp(state.capture, orderPts(state.quad));
+      state.rotation = 0;
+      state.filter = 'scan';
+      setFilterChips();
+      renderEnhanced();
+      show('s-enhance');
+    };
+
+    /* ---------- Procesamiento ---------- */
+    function warp(srcCanvas, q) {
+      const cv = window.cv, [tl, tr, br, bl] = q, D = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      let w = Math.max(D(tl, tr), D(bl, br)), h = Math.max(D(tl, bl), D(tr, br));
+      const k = Math.min(1, 2200 / Math.max(w, h));
+      w = Math.max(10, Math.round(w * k)); h = Math.max(10, Math.round(h * k));
+      const src = cv.imread(srcCanvas), dst = new cv.Mat();
+      const sp = cv.matFromArray(4, 1, cv.CV_32FC2, [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]);
+      const dp = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, w, 0, w, h, 0, h]);
+      const M = cv.getPerspectiveTransform(sp, dp);
+      cv.warpPerspective(src, dst, M, new cv.Size(w, h), cv.INTER_LINEAR, cv.BORDER_REPLICATE, new cv.Scalar());
+      const out = document.createElement('canvas');
+      cv.imshow(out, dst);
+      [src, dst, sp, dp, M].forEach(m => m.delete());
+      return out;
+    }
+
+    function applyFilter(canvas, mode) {
+      const cv = window.cv;
+      const src = cv.imread(canvas), out = new cv.Mat();
+      try {
+        if (mode === 'color') {
+          src.convertTo(out, -1, 1.12, 8);
+        } else {
+          const g = new cv.Mat(), bg = new cv.Mat();
+          cv.cvtColor(src, g, cv.COLOR_RGBA2GRAY);
+          if (mode === 'bw') {
+            cv.GaussianBlur(g, g, new cv.Size(3, 3), 0);
+            cv.adaptiveThreshold(g, out, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 31, 12);
+          } else {
+            // "Escáner": quita sombras dividiendo por el fondo estimado y sube el contraste
+            const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(15, 15));
+            cv.dilate(g, bg, k); k.delete();
+            cv.GaussianBlur(bg, bg, new cv.Size(51, 51), 0);
+            cv.divide(g, bg, out, 255);
+            out.convertTo(out, -1, 1.35, -85);
+          }
+          g.delete(); bg.delete();
+        }
+        const c = document.createElement('canvas');
+        cv.imshow(c, out);
+        return c;
+      } finally { src.delete(); out.delete(); }
+    }
+
+    function rotateCanvas(c, deg) {
+      if (!deg) return c;
+      const r = document.createElement('canvas'), swap = deg % 180 !== 0;
+      r.width = swap ? c.height : c.width; r.height = swap ? c.width : c.height;
+      const x = r.getContext('2d');
+      x.translate(r.width / 2, r.height / 2); x.rotate(deg * Math.PI / 180);
+      x.drawImage(c, -c.width / 2, -c.height / 2);
+      return r;
+    }
+
+    function renderEnhanced() {
+      const c = rotateCanvas(applyFilter(state.warped, state.filter), state.rotation);
+      state.enhanced = { url: c.toDataURL('image/jpeg', 0.78), w: c.width, h: c.height };
+      $('enhImg').src = state.enhanced.url;
+    }
+
+    function setFilterChips() {
+      document.querySelectorAll('[data-filter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.filter === state.filter));
+    }
+    document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => {
+      state.filter = b.dataset.filter; setFilterChips(); renderEnhanced();
+    }));
+    $('btnRotate').onclick = () => { state.rotation = (state.rotation + 90) % 360; renderEnhanced(); };
+    $('btnBackCrop').onclick = () => show('s-crop');
+    $('btnAddPage').onclick = () => {
+      state.pages.push(state.enhanced);
+      state.capture = state.warped = state.enhanced = null;
+      openPages();
+    };
+
+    /* ---------- Hojas y subida ---------- */
+    function openPages() {
+      const n = state.pages.length;
+      $('pagesTitle').textContent = n === 1 ? '1 hoja escaneada' : n + ' hojas escaneadas';
+      $('pages').innerHTML = state.pages.map((p, i) => `
+        <div class="page"><img src="${p.url}" alt="Hoja ${i + 1}">
+          <div class="n">Hoja ${i + 1}<button type="button" data-del="${i}">Quitar</button></div></div>`).join('');
+      $('pages').querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+        state.pages.splice(Number(b.dataset.del), 1);
+        state.pages.length ? openPages() : openCamera();
+      });
+      $('btnUpload').disabled = n === 0;
+      setErr($('uploadErr'));
+      show('s-pages');
+    }
+    $('btnMore').onclick = () => openCamera();
+    $('btnDiscard').onclick = () => { if (confirm('¿Descartar las hojas escaneadas?')) { state.pages = []; openForm(); } };
+
+    function buildPdf() {
+      const { jsPDF } = window.jspdf;
+      let pdf = null;
+      state.pages.forEach(p => {
+        const W = 595.28, H = W * p.h / p.w, o = H >= W ? 'p' : 'l';
+        if (!pdf) pdf = new jsPDF({ unit: 'pt', format: [W, H], orientation: o, compress: true });
+        else pdf.addPage([W, H], o);
+        pdf.addImage(p.url, 'JPEG', 0, 0, W, H, undefined, 'FAST');
+      });
+      return pdf.output('datauristring');
+    }
+
+    $('btnUpload').onclick = async () => {
+      const btns = ['btnUpload', 'btnMore', 'btnDiscard'].map($);
+      btns.forEach(b => b.disabled = true);
+      $('uploading').classList.remove('hidden'); setErr($('uploadErr'));
+      try {
+        const pdf = buildPdf();
+        if (pdf.length > 45e6) throw new Error('El archivo es demasiado grande. Quitá alguna hoja y subí en dos partes.');
+        const r = await api('upload', {
+          token: state.session.token, objetivoId: state.sel.objetivoId, puestoId: state.sel.puestoId,
+          fecha: state.sel.fecha, hojas: state.pages.length, pdf
+        });
+        state.pages = [];
+        const pu = (state.session.objetivos.find(o => o.id === state.sel.objetivoId) || { puestos: [] })
+          .puestos.find(p => p.id === state.sel.puestoId);
+        if (pu && (!pu.ultima || r.fecha > pu.ultima)) { pu.ultima = r.fecha; saveSession(state.session); }
+        $('doneName').textContent = r.archivo;
+        $('doneLink').href = r.url;
+        show('s-done');
+      } catch (err) {
+        if (!handleAuth(err)) setErr($('uploadErr'), err.message + ' Las hojas siguen guardadas en esta pantalla: podés reintentar.');
+      } finally {
+        btns.forEach(b => b.disabled = false);
+        $('uploading').classList.add('hidden');
+      }
+    };
+    $('btnAnother').onclick = () => openForm();
+
+    window.addEventListener('beforeunload', e => { if (state.pages.length) { e.preventDefault(); e.returnValue = ''; } });
+
+    /* ---------- Inicio ---------- */
+    const saved = local.get('planillas_session');
+    const lastCuil = local.get('planillas_last_cuil');
+    if (lastCuil) $('cuil').value = fmtCuil(lastCuil);
+    if (saved && saved.exp > Date.now()) {
+      state.session = saved; renderWho(); openForm();
+      api('catalog', { token: saved.token })
+        .then(r => { saved.objetivos = r.objetivos; saveSession(saved); if (!$('s-form').classList.contains('hidden')) openForm(); })
+        .catch(handleAuth);
+      loadCV().catch(() => {});
+    } else {
+      local.del('planillas_session'); show('s-login');
+    }
+  })();
+  </script>
+</body>
+</html>
