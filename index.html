@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>Planillas · SG APP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="assets/styles.css">
+  <style>
+    .wrap > section { gap: 20px; }
+    .doors { display: flex; flex-direction: column; gap: 12px; }
+    .door {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      text-decoration: none; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 20px; transition: border-color .15s, transform .15s;
+    }
+    .door:hover, .door:focus-visible { border-color: var(--accent); outline: none; }
+    .door:active { transform: scale(.98); }
+    .door .d-title { font-family: var(--display); font-size: 26px; letter-spacing: 3px; line-height: 1; color: var(--text); }
+    .door .d-sub { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+    .door .d-tag {
+      flex-shrink: 0; font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+      padding: 4px 9px; border-radius: 20px; color: var(--accent); background: #0d2e18; border: 1px solid #1a4a26;
+    }
+    .door.admin .d-tag { color: #9a9a9a; background: var(--surface2); border-color: var(--border); }
+    .foot { font-size: 11px; color: #555; text-align: center; letter-spacing: .5px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./">SG APP</a>
+  </header>
+
+  <main class="wrap">
+    <section>
+      <div class="brand-block">
+        <div class="title">PLANILLAS</div>
+        <div class="subtitle">Ingresos y egresos</div>
+      </div>
+      <div class="divider"></div>
+
+      <nav class="doors">
+        <a class="door" href="app/">
+          <div>
+            <div class="d-title">CARGAR PLANILLA</div>
+            <div class="d-sub">Ingresá con tu CUIL, elegí objetivo y puesto, y escaneá la planilla de papel.</div>
+          </div>
+          <span class="d-tag">Supervisores</span>
+        </a>
+        <a class="door admin" href="admin/">
+          <div>
+            <div class="d-title">ADMINISTRACIÓN</div>
+            <div class="d-sub">Habilitar CUILs, cargar objetivos y puestos, y ver las planillas recibidas.</div>
+          </div>
+          <span class="d-tag">Oficina</span>
+        </a>
+      </nav>
+
+      <div class="divider"></div>
+      <p class="foot">Las planillas se archivan en Drive por objetivo, puesto y fecha.</p>
+    </section>
+  </main>
+</body>
+</html>
