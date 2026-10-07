@@ -2,11 +2,11 @@
    - Páginas y archivos propios: primero la red (siempre la última versión), y si no hay señal, la copia guardada.
    - Librerías externas (escáner, PDF, tipografías): primero la copia guardada, así cargan al instante.
    - Las llamadas al servidor (Apps Script) no se tocan nunca. */
-const VERSION = 'sg-planillas-v1';
+const VERSION = 'sg-planillas-v2';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   '../assets/styles.css', '../assets/api.js', '../assets/config.js',
-  './icons/icon-192.png', './icons/icon-512.png'
+  './icon-192.png', './icon-512.png'
 ];
 const CDN_HOSTS = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'docs.opencv.org', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 
